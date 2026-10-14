@@ -26,7 +26,7 @@ jobs:
       # 2. 화면의 __BUILD_INFO__ 를 커밋 ID와 배포 시각(일본 시간)으로 교체
       - name: 빌드 정보 기록
         run: |
-          BUILD_INFO="${GITHUB_SHA::7} / $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M:%s')"
+          BUILD_INFO="${GITHUB_SHA::7} / $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M:%S')"
           sed -i "s|__BUILD_INFO__|${BUILD_INFO}|" index.html
 
       # 3. Pages 설정 확인
