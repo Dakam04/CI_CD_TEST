@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CI/CD 테스트</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f4f6f8;
+    }
+    .card {
+      background: #fff;
+      padding: 32px 40px;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+      text-align: center;
+    }
+    h1 { margin: 0 0 12px; color: #2e7d32; }
+    p { margin: 6px 0; color: #444; }
+    code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>배포 성공</h1>
+    <!-- 배포 확인용: 이 숫자를 바꿔 push하면 화면이 바뀌는지 확인 -->
+    <p>버전: <code>v1.0.0</code></p>
+    <!-- __BUILD_INFO__ 는 Actions가 배포 직전에 커밋 ID와 시각으로 바꿔 넣음 -->
+    <p>빌드: <code>__BUILD_INFO__</code></p>
+  </div>
+</body>
+</html>

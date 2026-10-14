@@ -1,0 +1,41 @@
+name: GitHub Pages 배포
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:            # Actions 탭에서 수동 실행 버튼 활성화
+
+# Pages에 배포하려면 필요한 권한
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      # 1. 저장소 코드 받기
+      - uses: actions/checkout@v4
+
+      # 2. 화면의 __BUILD_INFO__ 를 커밋 ID와 배포 시각(일본 시간)으로 교체
+      - name: 빌드 정보 기록
+        run: |
+          BUILD_INFO="${GITHUB_SHA::7} / $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')"
+          sed -i "s|__BUILD_INFO__|${BUILD_INFO}|" index.html
+
+      # 3. Pages 설정 확인
+      - uses: actions/configure-pages@v5
+
+      # 4. 올릴 파일 묶기 (저장소 루트 전체)
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      # 5. GitHub Pages에 배포
+      - id: deployment
+        uses: actions/deploy-pages@v4
