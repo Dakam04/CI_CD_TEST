@@ -24,10 +24,17 @@
     h1 { margin: 0 0 12px; color: #2e7d32; }
     p { margin: 6px 0; color: #444; }
     code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+    /* 배포 위치 표시: 운영은 빨강, dev는 파랑 */
+    .slot { display: inline-block; margin-bottom: 12px; padding: 4px 12px; border-radius: 999px; color: #fff; font-weight: bold; background: #1565c0; }
+    [data-slot="prod"] .slot { background: #c62828; }
+    [data-slot="prod"] .card { border-top: 6px solid #c62828; }
+    [data-slot="dev"] .card { border-top: 6px solid #1565c0; }
   </style>
 </head>
-<body>
+<!-- 배포 위치(dev/prod)는 Actions가 배포할 때 채워 넣음 -->
+<body data-slot="__SLOT__">
   <div class="card">
+    <span class="slot">__SLOT_NAME__</span>
     <h1>배포 성공</h1>
     <!-- 버전은 Actions가 커밋 메시지(fix/feature/BREAKING CHANGE)로 계산해 넣음. 직접 수정하지 않음 -->
     <p>버전: <code>__VERSION__</code></p>
