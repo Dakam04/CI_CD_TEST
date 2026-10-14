@@ -14,8 +14,9 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # 배포 대상 환경. 운영 환경을 만들면 이 이름만 바꾸거나 job을 추가한다.
     environment:
-      name: github-pages
+      name: dev
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
