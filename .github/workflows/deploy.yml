@@ -119,12 +119,16 @@ jobs:
 
             git worktree add -q --detach "_wt/$TARGET" "origin/$TARGET"
             if [ -z "$(git log "origin/$TARGET" --grep="cherry picked from commit $SHA" --format=%h)" ]; then
-              if ! git -C "_wt/$TARGET" cherry-pick -x "$SHA"; then
-                git -C "_wt/$TARGET" cherry-pick --abort
+              if ! git diff "$SHA^" "$SHA" -- app | git -C "_wt/$TARGET" apply --3way --allow-empty; then
+                git -C "_wt/$TARGET" reset -q --hard
                 echo "::warning::$TARGET 브랜치에 hotfix를 적용하지 못함(충돌). $SLOT 배포를 건너뜀. 직접 반영 필요"
                 continue
               fi
-              git -C "_wt/$TARGET" push origin "HEAD:$TARGET"
+              if ! git -C "_wt/$TARGET" diff --cached --quiet; then
+                git -C "_wt/$TARGET" commit -q --author="$(git log -1 --format='%an <%ae>' "$SHA")" \
+                  -m "$(git log -1 --format=%B "$SHA")" -m "(cherry picked from commit $SHA)"
+                git -C "_wt/$TARGET" push origin "HEAD:$TARGET"
+              fi
             fi
 
             mkdir -p "_site/$SLOT"
