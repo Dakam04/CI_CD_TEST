@@ -1,156 +1,46 @@
 name: GitHub Pages 배포
 
 on:
-  push:
-    branches: [ main ]          # main에 push → dev 위치로 자동 배포
-  workflow_dispatch:            # Actions 탭에서 수동 실행 → 배포 위치 선택
+  workflow_dispatch:
     inputs:
       target:
         description: 배포 위치
         type: choice
-        options: [ dev, prod ]
-        default: dev
+        options: [dev, prod]
+      tag:
+        required: true
 
-# 동시에 두 번 실행되면 같은 버전 태그를 만들거나 gh-pages push가 충돌할 수 있으므로 한 번에 하나씩 실행
-concurrency:
-  group: deploy
-  cancel-in-progress: false
+concurrency: deploy
 
 jobs:
-  # 배포 위치와 버전을 정한다.
-  #   dev  : 커밋 메시지로 다음 버전을 계산
-  #            BREAKING CHANGE: → major, feature: → minor, fix: → patch
-  #            최신 커밋이 wip: 이거나 해당 커밋이 없으면 배포하지 않음
-  #   prod : 새 버전을 만들지 않고 현재 커밋의 버전(가장 가까운 태그)을 그대로 배포
-  version:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      target: ${{ steps.calc.outputs.target }}
-      release: ${{ steps.calc.outputs.release }}
-      version: ${{ steps.calc.outputs.version }}
-      new_tag: ${{ steps.calc.outputs.new_tag }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0          # 태그와 전체 커밋 이력이 필요
-
-      - name: 배포 위치와 버전 계산
-        id: calc
-        env:
-          TARGET: ${{ inputs.target || 'dev' }}   # push로 실행되면 inputs가 비어 있으므로 dev
-        run: |
-          set -euo pipefail
-          echo "target=${TARGET}" >> "$GITHUB_OUTPUT"
-
-          LAST_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)
-
-          if [ "$TARGET" = prod ]; then
-            if [ -z "$LAST_TAG" ]; then
-              echo "::error::버전 태그가 없어 운영 배포 불가. dev 배포를 먼저 해야 함"
-              exit 1
-            fi
-            echo "::notice::운영 배포 → ${LAST_TAG}"
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "version=${LAST_TAG#v}" >> "$GITHUB_OUTPUT"
-            echo "new_tag=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ -n "$LAST_TAG" ]; then
-            RANGE="${LAST_TAG}..HEAD"
-            BASE="${LAST_TAG#v}"
-          else
-            RANGE="HEAD"
-            BASE="0.0.0"
-          fi
-
-          HEAD_SUBJECT=$(git log -1 --format=%s)
-          if [[ "$HEAD_SUBJECT" =~ ^wip[[:space:]]*: ]]; then
-            echo "::notice::wip 커밋이라 배포하지 않음 (${HEAD_SUBJECT})"
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          BUMP=none
-          while IFS= read -r -d '' MSG || [ -n "$MSG" ]; do
-            SUBJECT="${MSG%%$'\n'*}"
-            if grep -Eq '^BREAKING CHANGE[[:space:]]*:' <<< "$MSG"; then
-              BUMP=major
-              break
-            elif [[ "$SUBJECT" =~ ^feature[[:space:]]*: ]]; then
-              BUMP=minor
-            elif [[ "$SUBJECT" =~ ^fix[[:space:]]*: ]] && [ "$BUMP" = none ]; then
-              BUMP=patch
-            fi
-          done < <(git log -z --format=%B "$RANGE")
-
-          if [ "$BUMP" = none ]; then
-            echo "::notice::fix, feature, BREAKING CHANGE 커밋이 없어 배포하지 않음"
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          IFS=. read -r MAJOR MINOR PATCH <<< "$BASE"
-          case "$BUMP" in
-            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH + 1)) ;;
-          esac
-          VERSION="${MAJOR}.${MINOR}.${PATCH}"
-
-          echo "::notice::${BUMP} 변경 → dev 배포 v${VERSION}"
-          echo "release=true" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "new_tag=true" >> "$GITHUB_OUTPUT"
-
   deploy:
-    needs: version
-    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write           # gh-pages 브랜치 push, 버전 태그 push
-    # 배포 위치별 environment (dev / prod). 위치별 Secret이나 승인 규칙을 걸 때 사용
-    environment:
-      name: ${{ needs.version.outputs.target }}
-      url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ needs.version.outputs.target }}/
-
-    env:
-      TARGET: ${{ needs.version.outputs.target }}
-      VERSION: ${{ needs.version.outputs.version }}
-
+      contents: write
+    environment: ${{ inputs.target }}
     steps:
-      # 1. 저장소 코드 받기
+      - name: 태그 입력 확인
+        if: inputs.tag == ''
+        run: |
+          echo "::error::태그를 입력해야 함"
+          exit 1
+
       - uses: actions/checkout@v4
 
-      # 2. 배포할 파일 구성
-      #    _site/index.html       ← portal.html (배포 위치 선택 화면)
-      #    _site/<dev|prod>/      ← index.html (배포 위치, 버전, 커밋 ID, 배포 시각을 채워 넣음)
       - name: 배포 파일 구성
+        env:
+          TARGET: ${{ inputs.target }}
+          TAG: ${{ inputs.tag }}
         run: |
           if [ "$TARGET" = prod ]; then SLOT_NAME="운영"; else SLOT_NAME="dev"; fi
           BUILD_INFO="${GITHUB_SHA::7} / $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M:%S')"
-
-          mkdir -p "_site/${TARGET}"
+          mkdir -p "_site/$TARGET"
           cp portal.html _site/index.html
-          sed "s|__SLOT__|${TARGET}|; s|__SLOT_NAME__|${SLOT_NAME}|; s|__VERSION__|v${VERSION}|; s|__BUILD_INFO__|${BUILD_INFO}|" \
-            index.html > "_site/${TARGET}/index.html"
+          sed "s|__SLOT_NAME__|$SLOT_NAME|; s|__VERSION__|$TAG|; s|__BUILD_INFO__|$BUILD_INFO|" index.html > "_site/$TARGET/index.html"
 
-      # 3. gh-pages 브랜치에 push. keep_files: true 라서 다른 위치(dev/prod) 폴더는 그대로 남음
       - name: gh-pages 브랜치에 배포
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
           publish_dir: ./_site
           keep_files: true
-          commit_message: "deploy ${{ needs.version.outputs.target }} v${{ needs.version.outputs.version }}"
-
-      # 4. dev 배포가 성공한 경우에만 버전 태그 기록 (다음 버전 계산의 기준)
-      - name: 버전 태그 생성
-        if: needs.version.outputs.new_tag == 'true'
-        run: |
-          git tag "v${VERSION}"
-          git push origin "v${VERSION}"
