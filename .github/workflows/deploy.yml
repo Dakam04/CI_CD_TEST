@@ -11,7 +11,7 @@ on:
         description: "태그 (예: v1.0.0)"
         required: true
       hotfix:
-        description: "hotfix (dev, qa, prod_KR, prod_JP 모두 배포)"
+        description: "hotfix 모든 브랜치에 배포"
         type: boolean
         default: false
 
