@@ -36,7 +36,7 @@ jobs:
         env:
           BRANCH: ${{ github.ref_name }}
         run: |
-          if [ "$BRANCH" = dev ]; then
+          if [ "$BRANCH" = main ]; then
             SLOTS="dev"
           elif [ "$BRANCH" = KR ]; then
             SLOTS="prod_KR"
