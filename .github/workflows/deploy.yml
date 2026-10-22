@@ -1,44 +1,91 @@
-name: GitHub Pages 배포
+name: CI/CD
 
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: 배포 위치
-        type: choice
-        options: [dev, prod]
       tag:
+        description: "태그 (예: v1.0.0)"
         required: true
 
 concurrency: deploy
 
 jobs:
-  deploy:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      slots: ${{ steps.slots.outputs.slots }}
+      env: ${{ steps.slots.outputs.env }}
+
+    steps:
+      - name: "CI: 태그 확인"
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$TAG" ]; then
+            echo "::error::태그를 입력해야 함"
+            exit 1
+          fi
+
+      - name: "CI: 코드 가져오기"
+        uses: actions/checkout@v4
+
+      - name: "CI: 배포 위치 정하기"
+        id: slots
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ "$BRANCH" = dev ]; then
+            SLOTS="dev"
+          elif [ "$BRANCH" = KR ]; then
+            SLOTS="prod_KR"
+          elif [ "$BRANCH" = JP ]; then
+            SLOTS="prod_JP"
+          else
+            echo "::error::유효하지 않은 브랜치"
+            exit 1
+          fi
+
+          if [[ "$(git log -1 --format=%s)" == fix:* ]]; then
+            SLOTS="dev prod_KR prod_JP"
+          fi
+
+          if [ "$SLOTS" = dev ]; then
+            ENV=dev
+          else
+            ENV=prod
+          fi
+
+          echo "slots=$SLOTS" >> "$GITHUB_OUTPUT"
+          echo "env=$ENV" >> "$GITHUB_OUTPUT"
+
+  cicd:
+    needs: plan
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    environment: ${{ inputs.target }}
+    environment: ${{ needs.plan.outputs.env }}
+    env:
+      SLOTS: ${{ needs.plan.outputs.slots }}
+      TAG: ${{ inputs.tag }}
+
     steps:
-      - name: 태그 입력 확인
-        if: inputs.tag == ''
-        run: |
-          echo "::error::태그를 입력해야 함"
-          exit 1
+      - name: "CI: 코드 가져오기"
+        uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-
-      - name: 배포 파일 구성
-        env:
-          TARGET: ${{ inputs.target }}
-          TAG: ${{ inputs.tag }}
+      - name: "CI: 배포 파일 만들기"
         run: |
-          if [ "$TARGET" = prod ]; then SLOT_NAME="운영"; else SLOT_NAME="dev"; fi
-          BUILD_INFO="${GITHUB_SHA::7} / $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M:%S')"
-          mkdir -p "_site/$TARGET"
+          BUILD_INFO="$(git rev-parse --short HEAD) / $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')"
+
+          mkdir -p _site
           cp portal.html _site/index.html
-          sed "s|__SLOT_NAME__|$SLOT_NAME|; s|__VERSION__|$TAG|; s|__BUILD_INFO__|$BUILD_INFO|" index.html > "_site/$TARGET/index.html"
+          for SLOT in $SLOTS; do
+            mkdir -p "_site/$SLOT"
+            sed "s|__SLOT_NAME__|$SLOT|; s|__VERSION__|$TAG|; s|__BUILD_INFO__|$BUILD_INFO|" index.html > "_site/$SLOT/index.html"
+          done
 
-      - name: gh-pages 브랜치에 배포
+      - name: "CD: GitHub Pages에 배포"
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
