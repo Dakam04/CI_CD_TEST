@@ -3,6 +3,10 @@ name: CI/CD
 on:
   workflow_dispatch:
     inputs:
+      branch:
+        description: 배포할 브랜치
+        type: choice
+        options: [main, QA, KR, JP]
       tag:
         description: "태그 (예: v1.0.0)"
         required: true
@@ -38,7 +42,7 @@ jobs:
       - name: "CI: 배포 위치 정하기"
         id: slots
         env:
-          BRANCH: ${{ github.ref_name }}
+          BRANCH: ${{ inputs.branch }}
           HOTFIX: ${{ inputs.hotfix }}
         run: |
           if [ "$BRANCH" = main ]; then
@@ -68,32 +72,65 @@ jobs:
     permissions:
       contents: write
     env:
-      SLOTS: ${{ needs.plan.outputs.slots }}
       BRANCH_SLOT: ${{ needs.plan.outputs.branch_slot }}
       TAG: ${{ inputs.tag }}
+      HOTFIX: ${{ inputs.hotfix }}
+      BRANCH: ${{ inputs.branch }}
 
     steps:
       - name: "CI: 코드 가져오기"
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
 
       - name: "CI: 배포 파일 만들기"
         run: |
-          BUILD_INFO="$(git rev-parse --short HEAD) / $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')"
-          if [ "$SLOTS" != "$BRANCH_SLOT" ]; then
-            git fetch --depth 1 origin gh-pages
+          NOW="$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')"
+          BUILD_INFO="$(git rev-parse --short HEAD) / $NOW"
+          HOTFIX_INFO="-"
+          if [ "$HOTFIX" = true ]; then
+            HOTFIX_INFO="$BRANCH / $NOW"
           fi
+          echo "HOTFIX_INFO=$HOTFIX_INFO" >> "$GITHUB_ENV"
 
           mkdir -p _site
-          cp portal.html _site/index.html
-          for SLOT in $SLOTS; do
-            mkdir -p "_site/$SLOT"
-            cp -r app/. "_site/$SLOT/"
-            if [ "$SLOT" = "$BRANCH_SLOT" ]; then
-              sed -i "s|__SLOT_NAME__|$SLOT|; s|__VERSION__|$TAG|; s|__BUILD_INFO__|$BUILD_INFO|" "_site/$SLOT/index.html"
-            else
-              git show "origin/gh-pages:$SLOT/index.html" > "_site/$SLOT/index.html"
-              sed -i "s|버전: [^<]*|버전: $TAG|; s|빌드: [^<]*|빌드: $BUILD_INFO|" "_site/$SLOT/index.html"
+          git show origin/main:portal.html > _site/index.html
+          mkdir -p "_site/$BRANCH_SLOT"
+          cp -r app/. "_site/$BRANCH_SLOT/"
+          sed -i "s|__SLOT_NAME__|$BRANCH_SLOT|; s|__VERSION__|$TAG|; s|__BUILD_INFO__|$BUILD_INFO|; s|__HOTFIX_INFO__|$HOTFIX_INFO|" "_site/$BRANCH_SLOT/index.html"
+
+      - name: "hotfix 모든 브랜치에 적용"
+        if: inputs.hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          SHA=$(git rev-parse HEAD)
+
+          for TARGET in main QA KR JP; do
+            if [ "$TARGET" = main ]; then SLOT=dev
+            elif [ "$TARGET" = QA ]; then SLOT=qa
+            elif [ "$TARGET" = KR ]; then SLOT=prod_KR
+            else SLOT=prod_JP
             fi
+            if [ "$TARGET" = "$BRANCH" ]; then
+              continue
+            fi
+
+            git worktree add -q --detach "_wt/$TARGET" "origin/$TARGET"
+            if [ -z "$(git log "origin/$TARGET" --grep="cherry picked from commit $SHA" --format=%h)" ]; then
+              if ! git -C "_wt/$TARGET" cherry-pick -x "$SHA"; then
+                git -C "_wt/$TARGET" cherry-pick --abort
+                echo "::warning::$TARGET 브랜치에 hotfix를 적용하지 못함(충돌). $SLOT 배포를 건너뜀. 직접 반영 필요"
+                continue
+              fi
+              git -C "_wt/$TARGET" push origin "HEAD:$TARGET"
+            fi
+
+            mkdir -p "_site/$SLOT"
+            cp -r "_wt/$TARGET/app/." "_site/$SLOT/"
+            git show "origin/gh-pages:$SLOT/index.html" > "_site/$SLOT/index.html"
+            sed -i "s|마지막 핫픽스: [^<]*|마지막 핫픽스: $HOTFIX_INFO|" "_site/$SLOT/index.html"
           done
 
       - name: "CD: GitHub Pages에 배포"
