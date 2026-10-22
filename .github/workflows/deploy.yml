@@ -6,6 +6,10 @@ on:
       tag:
         description: "태그 (예: v1.0.0)"
         required: true
+      hotfix:
+        description: "hotfix (dev, qa, prod_KR, prod_JP 모두 배포)"
+        type: boolean
+        default: false
 
 concurrency: deploy
 
@@ -16,7 +20,6 @@ jobs:
       contents: read
     outputs:
       slots: ${{ steps.slots.outputs.slots }}
-      env: ${{ steps.slots.outputs.env }}
 
     steps:
       - name: "CI: 태그 확인"
@@ -35,6 +38,7 @@ jobs:
         id: slots
         env:
           BRANCH: ${{ github.ref_name }}
+          HOTFIX: ${{ inputs.hotfix }}
         run: |
           if [ "$BRANCH" = main ]; then
             SLOTS="dev"
@@ -49,25 +53,18 @@ jobs:
             exit 1
           fi
 
-          if [[ "$(git log -1 --format=%s)" == fix:* ]]; then
-            SLOTS="dev prod_KR prod_JP"
-          fi
-
-          if [ "$SLOTS" = dev ]; then
-            ENV=dev
-          else
-            ENV=prod
+          if [ "$HOTFIX" = true ]; then
+            SLOTS="dev qa prod_KR prod_JP"
           fi
 
           echo "slots=$SLOTS" >> "$GITHUB_OUTPUT"
-          echo "env=$ENV" >> "$GITHUB_OUTPUT"
+          echo "hotfix=$ENV" >> "$GITHUB_OUTPUT"
 
   cicd:
     needs: plan
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    environment: ${{ needs.plan.outputs.env }}
     env:
       SLOTS: ${{ needs.plan.outputs.slots }}
       TAG: ${{ inputs.tag }}
