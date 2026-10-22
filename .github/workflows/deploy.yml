@@ -38,6 +38,8 @@ jobs:
         run: |
           if [ "$BRANCH" = dev ]; then
             SLOTS="dev"
+          elif [ "$BRANCH" = QA ]; then
+            SLOTS="qa"
           elif [ "$BRANCH" = KR ]; then
             SLOTS="prod_KR"
           elif [ "$BRANCH" = JP ]; then
