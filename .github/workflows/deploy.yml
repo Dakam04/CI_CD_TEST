@@ -1,6 +1,8 @@
 name: CI/CD
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       branch:
@@ -28,6 +30,7 @@ jobs:
 
     steps:
       - name: "CI: 태그 확인"
+        if: github.event_name == 'workflow_dispatch'
         env:
           TAG: ${{ inputs.tag }}
         run: |
@@ -42,7 +45,7 @@ jobs:
       - name: "CI: 배포 위치 정하기"
         id: slots
         env:
-          BRANCH: ${{ inputs.branch }}
+          BRANCH: ${{ inputs.branch || github.ref_name }}
           HOTFIX: ${{ inputs.hotfix }}
         run: |
           if [ "$BRANCH" = main ]; then
@@ -75,17 +78,24 @@ jobs:
       BRANCH_SLOT: ${{ needs.plan.outputs.branch_slot }}
       TAG: ${{ inputs.tag }}
       HOTFIX: ${{ inputs.hotfix }}
-      BRANCH: ${{ inputs.branch }}
+      BRANCH: ${{ inputs.branch || github.ref_name }}
 
     steps:
       - name: "CI: 코드 가져오기"
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ inputs.branch || github.ref_name }}
           fetch-depth: 0
 
       - name: "CI: 배포 파일 만들기"
         run: |
+          if git rev-parse -q --verify "refs/tags/$BRANCH_SLOT-$TAG" > /dev/null; then
+            echo "::error::$BRANCH_SLOT-$TAG 태그가 이미 있음. 다른 태그로 실행해야 함"
+            exit 1
+          fi
+          if [ -z "$TAG" ]; then
+            TAG=$(git rev-parse --short HEAD)
+          fi
           NOW="$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')"
           BUILD_INFO="$(git rev-parse --short HEAD) / $NOW"
           HOTFIX_INFO="-"
@@ -121,7 +131,7 @@ jobs:
             git checkout -q "origin/$TARGET"
             if ! git diff "$SHA^" "$SHA" -- app | git apply --3way --allow-empty; then
               git reset -q --hard
-              echo "::error::$TARGET 브랜치에 hotfix를 적용하지 못함(충돌). $SLOT 배포를 건너뜀. 직접 반영 필요"
+              echo "::warning::$TARGET 브랜치에 hotfix를 적용하지 못함(충돌). $SLOT 배포를 건너뜀. 직접 반영 필요"
               continue
             fi
             if ! git diff --cached --quiet; then
@@ -135,10 +145,29 @@ jobs:
             sed -i "s|마지막 핫픽스: [^<]*|마지막 핫픽스: $HOTFIX_INFO|" "_site/$SLOT/index.html"
           done
 
+      - name: "CI: 테스트"
+        run: |
+          for DIR in _site/*/; do
+            test -f "$DIR/index.html"
+            test -f "$DIR/main/index.html"
+            if grep -q "__" "$DIR/index.html"; then
+              echo "::error::${DIR}index.html에 치환 안 된 값이 남아 있음"
+              exit 1
+            fi
+            node --check "$DIR/main/main.js"
+          done
+
       - name: "CD: GitHub Pages에 배포"
+        if: github.event_name == 'workflow_dispatch'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./_site
           keep_files: true
           commit_message: "deploy ${{ needs.plan.outputs.slots }} ${{ inputs.tag }}"
+
+      - name: "CD: 배포 태그 달기"
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git tag "$BRANCH_SLOT-$TAG" "origin/$BRANCH"
+          git push origin "$BRANCH_SLOT-$TAG"
